@@ -1,0 +1,12 @@
+{
+  "title": "RASPBERRY OLYMPICS",
+  "language": "ko",
+  "description": "Four energetic Raspberry Pi party games with clear GPIO-first controls, live rankings, and one final coffee runner.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
