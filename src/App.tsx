@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import LoudChallenge from "./components/LoudChallenge";
 import {
   BalanceGame,
@@ -10,20 +10,19 @@ import {
   type NewSport,
   type Ranking,
 } from "./components/OlympicGames";
+import { sound } from "./game/sound";
 
-type View = "menu" | "intro" | "playing" | "loud" | "final";
+type View = "menu" | "intro" | "playing" | "final";
 type Results = Partial<Record<NewSport, Ranking>>;
+const ORDER: NewSport[] = ["loud", "race", "balance", "food"];
 
 export default function App() {
   const [view, setView] = useState<View>("menu");
-  const [sport, setSport] = useState<NewSport>("race");
+  const [sport, setSport] = useState<NewSport>("loud");
   const [results, setResults] = useState<Results>({});
 
-  const selectSport = (nextSport: NewSport | "loud") => {
-    if (nextSport === "loud") {
-      setView("loud");
-      return;
-    }
+  const selectSport = (nextSport: NewSport) => {
+    void sound.unlock();
     setSport(nextSport);
     setView("intro");
   };
@@ -33,20 +32,20 @@ export default function App() {
   };
 
   const nextSport = () => {
-    const order: NewSport[] = ["race", "balance", "food"];
-    const currentIndex = order.indexOf(sport);
-    const next = order.slice(currentIndex + 1).find((item) => !results[item]);
+    const currentIndex = ORDER.indexOf(sport);
+    const next = ORDER.slice(currentIndex + 1).find((item) => !results[item]);
     if (next) {
       setSport(next);
       setView("intro");
     } else {
-      setView(Object.keys(results).length >= 3 ? "final" : "menu");
+      setView(Object.keys(results).length >= 4 ? "final" : "menu");
     }
   };
 
-  if (view === "loud") {
-    return <LoudChallenge onHome={() => setView("menu")} />;
-  }
+  const goMenu = useCallback(() => {
+    sound.stopBgm();
+    setView("menu");
+  }, []);
 
   return (
     <main className="app-shell olympic-app">
@@ -60,32 +59,46 @@ export default function App() {
       {view === "intro" && (
         <SportIntro
           sport={sport}
-          onBack={() => setView("menu")}
-          onStart={() => setView("playing")}
+          onBack={goMenu}
+          onStart={() => {
+            sound.play("go");
+            setView("playing");
+          }}
+        />
+      )}
+      {view === "playing" && sport === "loud" && (
+        <LoudChallenge
+          autoStart
+          onHome={goMenu}
+          onResult={(ranking) => saveResult("loud", ranking)}
+          onNext={nextSport}
         />
       )}
       {view === "playing" && sport === "race" && (
         <RaceGame
           onResult={(ranking) => saveResult("race", ranking)}
           onNext={nextSport}
+          onHome={goMenu}
         />
       )}
       {view === "playing" && sport === "balance" && (
         <BalanceGame
           onResult={(ranking) => saveResult("balance", ranking)}
           onNext={nextSport}
+          onHome={goMenu}
         />
       )}
       {view === "playing" && sport === "food" && (
         <FoodGame
           onResult={(ranking) => saveResult("food", ranking)}
           onNext={nextSport}
+          onHome={goMenu}
         />
       )}
       {view === "final" && (
         <OlympicFinal
           results={results}
-          onHome={() => setView("menu")}
+          onHome={goMenu}
           onReset={() => {
             setResults({});
             setView("menu");

@@ -1,13 +1,23 @@
+import { useState } from "react";
+import PartyFace from "./PartyFace";
+import { podiumMood } from "../game/faces";
+import { FLOOR_DB, LOUD_ROUNDS, PLAYERS, PLAYER_KEYS, type PlayerId, type Triple } from "../game/constants";
+import { lowestPlayerLine, loseLine, roastLine, winLine } from "../game/taunts";
+import { sound } from "../game/sound";
 import type { AudioStatus } from "../hooks/useAudioMeter";
 
 export type RoundResult = {
   target: number;
-  measured: [number, number];
-  differences: [number, number];
-  winner: 0 | 1 | 2;
+  measured: Triple;
+  differences: Triple;
+  winner: 0 | PlayerId;
 };
 
-type Scores = [number, number];
+type StartMood = "smirk" | "wild" | "panic" | "lose";
+
+export function HomeBrand({ onHome }: { onHome: () => void }) {
+  return <button type="button" className="loud-home-brand" onClick={onHome}><span>R</span> RASPBERRY OLYMPICS</button>;
+}
 
 function MicIcon({ className = "" }: { className?: string }) {
   return (
@@ -32,11 +42,11 @@ function Bolt({ side }: { side: "left" | "right" }) {
   return <span className={`bolt bolt-${side}`} aria-hidden="true" />;
 }
 
-function Waveform({ level, player }: { level: number; player: 1 | 2 }) {
-  const normalized = Math.max(0.1, (level - 45) / 60);
+function Waveform({ level }: { level: number }) {
+  const normalized = Math.max(0.1, (level - FLOOR_DB) / 60);
   return (
     <div className="waveform" aria-hidden="true">
-      {Array.from({ length: 17 }, (_, index) => {
+      {Array.from({ length: 11 }, (_, index) => {
         const rhythm = 0.32 + Math.abs(Math.sin(index * 1.7)) * 0.68;
         return (
           <span
@@ -45,7 +55,7 @@ function Waveform({ level, player }: { level: number; player: 1 | 2 }) {
               height: `${Math.max(12, normalized * rhythm * 88)}%`,
               animationDelay: `${index * -45}ms`,
             }}
-            className={`wave-bar wave-p${player}`}
+            className="wave-bar"
           />
         );
       })}
@@ -53,37 +63,54 @@ function Waveform({ level, player }: { level: number; player: 1 | 2 }) {
   );
 }
 
-function ScorePill({ scores, inverted = false }: { scores: Scores; inverted?: boolean }) {
+function ScorePill({ scores }: { scores: Triple }) {
   return (
-    <div className={`score-pill ${inverted ? "score-inverted" : ""}`}>
-      <span>P1</span><strong>{scores[0]}</strong>
-      <i />
-      <strong>{scores[1]}</strong><span>P2</span>
+    <div className="score-pill score-triple">
+      {PLAYERS.map((player, index) => (
+        <span key={player}>P{player} <strong>{scores[index]}</strong></span>
+      ))}
     </div>
   );
 }
 
-function AudioBadge({ status }: { status: AudioStatus }) {
+function AudioBadge({ status, onRetry }: { status: AudioStatus; onRetry?: () => void }) {
   const text =
-    status === "ready" ? "ONE MIC READY" :
+    status === "ready" ? (onRetry ? "ROOM MIC READY · RETRY" : "ROOM MIC READY") :
     status === "requesting" ? "CONNECTING MIC..." :
-    status === "unavailable" ? "KEYBOARD MODE" :
-    "MIC CHECK ON START";
+    status === "unavailable" ? (onRetry ? "TAP TO RETRY MIC" : "BUTTON SHOUT MODE") :
+    (onRetry ? "TAP TO ENABLE MIC" : "MIC CHECK ON START");
+  if (onRetry) {
+    return <button type="button" className={`audio-badge audio-badge-action status-${status}`} onClick={onRetry} title="마이크 다시 연결"><span />{text}</button>;
+  }
   return <div className={`audio-badge status-${status}`}><span />{text}</div>;
 }
 
 export function StartScreen({
   audioStatus,
   onStart,
+  onHome,
 }: {
   audioStatus: AudioStatus;
   onStart: () => void;
+  onHome: () => void;
 }) {
+  const [moods, setMoods] = useState<Record<PlayerId, StartMood>>({ 1: "smirk", 2: "smirk", 3: "smirk" });
+  const moodCycle: StartMood[] = ["smirk", "wild", "panic", "lose"];
+
+  const teasePlayer = (player: PlayerId) => {
+    setMoods((current) => {
+      const currentIndex = moodCycle.indexOf(current[player]);
+      return { ...current, [player]: moodCycle[(currentIndex + 1) % moodCycle.length] };
+    });
+    sound.play("taunt");
+  };
+
   return (
     <section className="screen start-screen">
       <div className="top-ribbon">
+        <button type="button" className="loud-ribbon-brand" onClick={onHome}><span>R</span> RASPBERRY OLYMPICS</button>
         <AudioBadge status={audioStatus} />
-        <span>5 ROUNDS · TAKE TURNS · 1 CHAMPION</span>
+        <span>3 PLAYERS · 1 ROUND · 1 COFFEE RUNNER</span>
       </div>
       <Bolt side="left" />
       <Bolt side="right" />
@@ -93,24 +120,20 @@ export function StartScreen({
           <MicIcon className="logo-mic" />
           <h1><span>LOUD</span><br />CHALLENGE</h1>
         </div>
-        <p className="tagline">숨겨진 목표 데시벨에<br className="mobile-break" /> 가장 가까운 소리를 만들어라!</p>
+        <p className="tagline">목표 데시벨에 가장 가깝게 소리 지르면 이긴다.<br className="mobile-break" /> 한 명씩 돌아가며, 핑계는 한 번만.</p>
         <button className="primary-button" onClick={onStart}>
           <span>GAME START</span><b aria-hidden="true">›</b>
         </button>
-        <div className="player-preview">
-          <div className="preview-player p1">
-            <span className="player-dot">1</span>
-            <div><small>READY?</small><strong>PLAYER 1</strong></div>
-            <kbd>A</kbd>
-          </div>
-          <div className="vs-badge">VS</div>
-          <div className="preview-player p2">
-            <kbd>L</kbd>
-            <div><small>READY?</small><strong>PLAYER 2</strong></div>
-            <span className="player-dot">2</span>
-          </div>
+        <div className="player-preview player-preview-triple">
+          {PLAYERS.map((player) => (
+            <button type="button" className={`preview-player preview-player-button p${player}`} key={player} onClick={() => teasePlayer(player)} aria-label={`PLAYER ${player} 표정 바꾸기`}>
+              <PartyFace player={player} mood={moods[player]} size={52} />
+              <div><small>READY?</small><strong>PLAYER {player}</strong></div>
+              <kbd>{PLAYER_KEYS[player].shout}</kbd>
+            </button>
+          ))}
         </div>
-        <p className="keyboard-hint">DEV CONTROL · 게임 중 A / L 키를 누르면 소리를 테스트할 수 있어요</p>
+        <p className="keyboard-hint">P1 → P2 → P3 · 차례인 사람만 소리 내세요. 마이크 미연결 시 키 입력으로 대체합니다.</p>
       </div>
     </section>
   );
@@ -123,24 +146,24 @@ export function ReadyScreen({
 }: {
   round: number;
   countdown: number;
-  player: 1 | 2;
+  player: PlayerId;
 }) {
   return (
     <section className="screen ready-screen">
-      <div className="round-chip">ROUND {round} <span>/ 5</span></div>
+      <div className="round-chip">ROUND {round} <span>/ {LOUD_ROUNDS}</span></div>
       <div className="secret-card">
         <div className="secret-icon"><MicIcon /></div>
-        <p>PLAYER {player} 차례 · 목표 데시벨은 비밀입니다</p>
+        <p>PLAYER {player} 차례 · 목표 데시벨을 노리세요</p>
         <div className="secret-value">??? <span>dB</span></div>
         <div className="secret-line" />
-        <small>LISTEN FOR THE SIGNAL</small>
+        <small>{roastLine(round)}</small>
       </div>
       <div className="countdown-orbit" key={countdown}>
         <div className="orbit-ring" />
         <strong>{countdown}</strong>
       </div>
       <h2>GET READY!</h2>
-      <p className="ready-help">PLAYER {player}, 마이크 가까이에서 준비하세요</p>
+      <p className="ready-help">PLAYER {player}만 소리 내세요. 나머지는 심사위원.</p>
     </section>
   );
 }
@@ -149,67 +172,90 @@ function PlayerPanel({
   player,
   level,
   peak,
-  active,
+  score,
+  turnStatus,
+  audioStatus,
 }: {
-  player: 1 | 2;
+  player: PlayerId;
   level: number;
   peak: number;
-  active: boolean;
+  score: number;
+  turnStatus: "active" | "done" | "waiting";
+  audioStatus: AudioStatus;
 }) {
-  const gauge = Math.max(4, Math.min(100, ((level - 45) / 60) * 100));
+  const gauge = Math.max(4, Math.min(100, ((level - FLOOR_DB) / 60) * 100));
+  const mood = turnStatus === "active" && level >= 88 ? "wild" : turnStatus === "active" && level >= 68 ? "panic" : "smirk";
+  const statusText = turnStatus === "active" ? (audioStatus === "ready" ? "MIC LIVE · 소리 내!" : "지금 네 차례") : turnStatus === "done" ? "측정 끝! 결과 대기" : "다음 순서 · 대기";
   return (
-    <div className={`player-panel player-${player} ${active ? "active-player" : "waiting-player"}`}>
+    <div className={`player-panel player-${player} ${turnStatus === "active" ? "active-player" : `turn-${turnStatus}`}`}>
       <div className="panel-heading">
-        <span className="number-box">{player}</span>
-        <div><small>{active ? "YOUR TURN" : peak > 45 ? "RECORDED" : "PLEASE WAIT"}</small><h2>PLAYER {player}</h2></div>
+        <PartyFace player={player} mood={mood} size={56} />
+        <div>
+          <small>{statusText}</small>
+          <h2>PLAYER {player}</h2>
+        </div>
+        <b className="panel-score">{score}</b>
       </div>
       <div className="db-reading">
         <strong>{Math.round(level)}</strong>
         <span>dB</span>
       </div>
-      {active ? <Waveform level={level} player={player} /> : <div className="waiting-message">{peak > 45 ? "DONE" : "WAIT"}</div>}
+      <Waveform level={level} />
       <div className="gauge-shell">
         <div className="gauge-fill" style={{ width: `${gauge}%` }} />
-        <span className="target-tick" />
       </div>
       <div className="gauge-labels"><span>45</span><b>PEAK {peak.toFixed(1)}</b><span>105</span></div>
-      <div className="key-control">HOLD <kbd>{player === 1 ? "A" : "L"}</kbd> TO SIMULATE</div>
+      <div className="key-control">{turnStatus === "active" ? audioStatus === "ready" ? "마이크 자동 측정 · 소리 내세요" : <>키 모드 · HOLD <kbd>{PLAYER_KEYS[player].shout}</kbd></> : turnStatus === "done" ? "측정 완료" : "차례 기다리는 중"}</div>
     </div>
   );
 }
 
 export function GameScreen({
   round,
-  activePlayer,
   levels,
   peaks,
   scores,
   time,
   audioStatus,
+  activePlayer,
+  onMicRetry,
 }: {
   round: number;
-  activePlayer: 1 | 2;
-  levels: Scores;
-  peaks: Scores;
-  scores: Scores;
+  levels: Triple;
+  peaks: Triple;
+  scores: Triple;
   time: number;
   audioStatus: AudioStatus;
+  activePlayer: PlayerId;
+  onMicRetry: () => void;
 }) {
   return (
-    <section className="screen game-screen">
-      <PlayerPanel player={1} level={levels[0]} peak={peaks[0]} active={activePlayer === 1} />
-      <PlayerPanel player={2} level={levels[1]} peak={peaks[1]} active={activePlayer === 2} />
+    <section className="screen game-screen game-screen-triple">
+      {PLAYERS.map((player) => (
+        <PlayerPanel
+          key={player}
+          player={player}
+          level={levels[player - 1]}
+          peak={peaks[player - 1]}
+          score={scores[player - 1]}
+          turnStatus={player === activePlayer ? "active" : player < activePlayer ? "done" : "waiting"}
+          audioStatus={audioStatus}
+        />
+      ))}
       <div className="game-hud">
-        <div className="round-mini">ROUND {round}/5</div>
+        <div className="round-mini">ROUND {round}/{LOUD_ROUNDS} · PLAYER {activePlayer} TURN</div>
         <ScorePill scores={scores} />
-        <div className="noise-callout"><small>PLAYER {activePlayer} · GO!</small>MAKE SOME<br />NOISE!</div>
+        <div className="noise-callout">
+          <small>TARGET LOCKED</small>
+          ???<span>dB</span>
+        </div>
         <div className="timer-box">
           <small>TIME LEFT</small>
           <strong>{Math.ceil(time).toString().padStart(2, "0")}</strong>
           <span>SEC</span>
           <div className="timer-track"><i style={{ width: `${(time / 5) * 100}%` }} /></div>
         </div>
-        <AudioBadge status={audioStatus} />
+        <AudioBadge status={audioStatus} onRetry={onMicRetry} />
       </div>
     </section>
   );
@@ -219,33 +265,38 @@ export function ResultScreen({
   round,
   result,
   scores,
-  isLastRound,
+  continueLabel,
   onContinue,
 }: {
   round: number;
   result: RoundResult;
-  scores: Scores;
-  isLastRound: boolean;
+  scores: Triple;
+  continueLabel: string;
   onContinue: () => void;
 }) {
-  const heading = result.winner === 0 ? "DRAW!" : `PLAYER ${result.winner} WINS!`;
+  const heading = result.winner === 0 ? "전원 비슷해서 무승부ㅋㅋ" : winLine(result.winner);
+  const worstDifference = Math.max(...result.differences);
+  const lowestPlayers = PLAYERS.filter((player) => Math.abs(result.differences[player - 1] - worstDifference) < 0.1);
   return (
     <section className="screen result-screen">
       <div className="result-header">
         <div><small>ROUND {round} COMPLETE</small><h1>ROUND RESULT</h1></div>
-        <ScorePill scores={scores} inverted />
+        <ScorePill scores={scores} />
       </div>
       <div className="target-reveal">
-        <small>SECRET TARGET</small>
+        <small>TARGET</small>
         <strong>{result.target}</strong><span>dB</span>
       </div>
-      <div className="result-grid">
-        {[0, 1].map((index) => {
-          const player = (index + 1) as 1 | 2;
+      <div className="result-grid result-grid-triple">
+        {PLAYERS.map((player) => {
+          const index = player - 1;
           const isWinner = result.winner === player;
+          const isLowest = lowestPlayers.includes(player);
           return (
-            <div className={`result-player result-p${player} ${isWinner ? "winner" : ""}`} key={player}>
+            <div className={`result-player result-p${player} ${isWinner ? "winner" : ""} ${isLowest ? "lowest" : ""}`} key={player}>
               {isWinner && <div className="winner-ribbon">+1 POINT</div>}
+              {isLowest && <div className="lowest-ribbon">최하위 · 놀림 대상</div>}
+              <PartyFace player={player} mood={isWinner ? "win" : result.differences[index] > 10 ? "lose" : "sweat"} size={64} />
               <div className="result-player-title"><span>{player}</span> PLAYER {player}</div>
               <div className="result-measurement">
                 <strong>{result.measured[index].toFixed(1)}</strong><span>dB</span>
@@ -256,8 +307,11 @@ export function ResultScreen({
         })}
       </div>
       <h2 className={`winner-announcement winner-${result.winner}`}>{heading}</h2>
+      <p className="result-roast">
+        {lowestPlayers.map((player) => <span key={player}>{lowestPlayerLine(player)}</span>)}
+      </p>
       <button className="secondary-button" onClick={onContinue}>
-        {isLastRound ? "VIEW FINAL RESULT" : "NEXT ROUND"} <span>›</span>
+        {continueLabel} <span>›</span>
       </button>
     </section>
   );
@@ -267,34 +321,45 @@ export function FinalScreen({
   scores,
   onAgain,
   onHome,
+  onNext,
 }: {
-  scores: Scores;
+  scores: Triple;
   onAgain: () => void;
   onHome: () => void;
+  onNext?: () => void;
 }) {
-  const winner = scores[0] === scores[1] ? 0 : scores[0] > scores[1] ? 1 : 2;
+  const ranking = [...PLAYERS].sort((a, b) => scores[b - 1] - scores[a - 1]);
+  const top = ranking[0];
+  const coffee = ranking[2];
+  const tied = scores[0] === scores[1] && scores[1] === scores[2];
   return (
     <section className="screen final-screen">
       <div className="confetti" aria-hidden="true">
         {Array.from({ length: 22 }, (_, i) => <i key={i} style={{ "--i": i } as React.CSSProperties} />)}
       </div>
-      <div className="final-kicker">5 ROUNDS COMPLETE</div>
+      <div className="final-kicker">{LOUD_ROUNDS} ROUNDS COMPLETE</div>
       <TrophyIcon />
       <h1>FINAL RESULT</h1>
-      <div className={`champion-text champion-${winner}`}>
-        {winner === 0 ? "IT'S A DRAW!" : `PLAYER ${winner} WIN!`}
+      <div className={`champion-text champion-${tied ? 0 : top}`}>
+        {tied ? "전원 동점, 커피는 가위바위보" : `PLAYER ${top} WIN!`}
       </div>
-      <div className="final-scoreboard">
-        <div className={`final-player final-p1 ${winner === 1 ? "champion" : ""}`}>
-          <small>PLAYER 1</small><strong>{scores[0]}</strong><span>POINTS</span>
-        </div>
-        <div className="final-divider"><span>FINAL</span><b>:</b></div>
-        <div className={`final-player final-p2 ${winner === 2 ? "champion" : ""}`}>
-          <small>PLAYER 2</small><strong>{scores[1]}</strong><span>POINTS</span>
-        </div>
+      <div className="final-scoreboard final-scoreboard-triple">
+        {ranking.map((player, place) => (
+          <div className={`final-player final-p${player} ${place === 0 ? "champion" : ""}`} key={player}>
+            <PartyFace player={player} mood={podiumMood(place + 1)} size={58} />
+            <small>PLAYER {player}</small>
+            <strong>{scores[player - 1]}</strong>
+            <span>{place === 0 ? "KING" : place === 2 ? "COFFEE" : "2ND"}</span>
+          </div>
+        ))}
       </div>
+      {!tied && <p className="coffee-taunt">PLAYER {coffee} {loseLine(coffee)}</p>}
       <div className="final-actions">
-        <button className="primary-button compact" onClick={onAgain}>PLAY AGAIN <b>↻</b></button>
+        {onNext ? (
+          <button className="primary-button compact" onClick={onNext}>다음 종목 <b>›</b></button>
+        ) : (
+          <button className="primary-button compact" onClick={onAgain}>PLAY AGAIN <b>↻</b></button>
+        )}
         <button className="home-button" onClick={onHome}>HOME</button>
       </div>
     </section>
