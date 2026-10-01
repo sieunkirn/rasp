@@ -210,7 +210,7 @@ export default function LoudChallenge({
     <main className="app-shell">
       {phase !== "start" && <HomeBrand onHome={goHome} />}
       {phase === "start" && <StartScreen audioStatus={status} onStart={beginGame} onHome={goHome} />}
-      {phase === "ready" && <ReadyScreen round={round} countdown={countdown} />}
+      {phase === "ready" && <ReadyScreen round={round} countdown={countdown} player={activePlayer} />}
       {phase === "game" && (
         <GameScreen
           round={round}

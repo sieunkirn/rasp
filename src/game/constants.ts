@@ -1,5 +1,4 @@
 export type PlayerId = 1 | 2 | 3;
-export type SportId = "loud" | "race" | "balance" | "food";
 export type Ranking = PlayerId[];
 
 export const PLAYERS: PlayerId[] = [1, 2, 3];
@@ -10,9 +9,9 @@ export const CEIL_DB = 105;
 
 export const PLAYER_COLORS = ["coral", "blue", "green"] as const;
 export const PLAYER_KEYS = {
-  1: { shout: "A", left: "A", right: "D", food: "A", numbers: "1 2 3" },
-  2: { shout: "J", left: "J", right: "L", food: "J", numbers: "4 5 6" },
-  3: { shout: "L", left: "←", right: "→", food: "L", numbers: "7 8 9 0" },
+  1: { shout: "A" },
+  2: { shout: "J" },
+  3: { shout: "L" },
 } as const;
 
 export type Triple = [number, number, number];

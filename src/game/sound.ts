@@ -13,10 +13,13 @@ export type SoundCue =
   | "round-win"
   | "round-lose"
   | "champion"
+  | "drumroll"
+  | "reveal"
   | "taunt"
+  | "applause"
   | "buzz";
 
-export type BgmId = "menu" | "loud" | "race" | "balance" | "food";
+export type BgmId = "menu" | "loud" | "balance" | "food" | "walk";
 export type SoundAssets = {
   cues?: Partial<Record<SoundCue, string>>;
   bgm?: Partial<Record<BgmId, string>>;
@@ -25,10 +28,13 @@ export type SoundAssets = {
 type OscType = OscillatorType;
 
 let context: AudioContext | null = null;
-let bgmNodes: { osc: OscillatorNode; gain: GainNode; timer: number } | null = null;
+let bgmNodes: { oscillators: OscillatorNode[]; gain: GainNode; timer: number } | null = null;
 let bgmAudio: HTMLAudioElement | null = null;
+let bgmGeneration = 0;
+let requestedBgm: BgmId | null = null;
 let soundAssets: SoundAssets = {};
 let muted = false;
+const cueAudio = new Set<HTMLAudioElement>();
 const lastPlayed: Partial<Record<SoundCue, number>> = {};
 
 export function configureSoundAssets(assets: SoundAssets) {
@@ -122,26 +128,46 @@ const CUES: Record<SoundCue, () => void> = {
       window.setTimeout(() => beep(note, index === 6 ? 0.3 : 0.11, "square", 0.055, index === 6 ? -90 : 0), index * 90);
     });
   },
+  drumroll: () => {
+    noiseBurst(0.09, 0.045);
+    beep(92, 0.075, "triangle", 0.035, -18);
+  },
+  reveal: () => {
+    noiseBurst(0.28, 0.06);
+    beep(62, 0.62, "sine", 0.11, -24);
+    beep(124, 0.34, "triangle", 0.07, -38);
+  },
   taunt: () => beep(700, 0.05, "square", 0.04, 200),
+  applause: () => {
+    for (let clap = 0; clap < 18; clap += 1) {
+      window.setTimeout(() => noiseBurst(0.055, 0.025 + Math.random() * 0.025), clap * 70 + Math.random() * 45);
+    }
+    beep(260, 0.55, "sawtooth", 0.018, 350);
+    beep(320, 0.46, "triangle", 0.016, 230);
+  },
   buzz: () => beep(180, 0.05, "square", 0.05),
 };
 
 const BGM_RIFFS: Record<BgmId, number[]> = {
   menu: [262, 370, 392, 330, 233, 349, 262, 185],
   loud: [196, 262, 220, 311, 196, 349, 247, 175],
-  race: [392, 440, 392, 587, 349, 392, 294, 370],
   balance: [220, 247, 185, 262, 174, 233, 147, 196],
   food: [330, 392, 349, 466, 294, 349, 262, 370],
+  walk: [293.66, 349.23, 440, 523.25, 440, 349.23, 293.66, 261.63],
 };
 
 export const sound = {
   async unlock() {
-    muted = false;
     await resume();
   },
   mute() {
     muted = true;
     this.stopBgm();
+    cueAudio.forEach((audio) => {
+      audio.pause();
+      audio.currentTime = 0;
+    });
+    cueAudio.clear();
   },
   play(cue: SoundCue) {
     if (muted) return;
@@ -153,70 +179,116 @@ export const sound = {
     if (source) {
       const audio = new Audio(source);
       audio.volume = 0.8;
-      void audio.play().catch(() => resume().then(() => CUES[cue]()));
+      cueAudio.add(audio);
+      audio.addEventListener("ended", () => cueAudio.delete(audio), { once: true });
+      void audio.play().catch(() => {
+        cueAudio.delete(audio);
+        if (!muted) void resume().then(() => { if (!muted) CUES[cue](); });
+      });
       return;
     }
-    void resume().then(() => CUES[cue]());
+    void resume().then(() => {
+      if (!muted) CUES[cue]();
+    });
+  },
+  playFile(source: string) {
+    if (muted) return;
+    const audio = new Audio(source);
+    audio.volume = 0.85;
+    cueAudio.add(audio);
+    audio.addEventListener("ended", () => cueAudio.delete(audio), { once: true });
+    void audio.play().catch(() => cueAudio.delete(audio));
   },
   startBgm(id: BgmId) {
-    if (muted) return;
+    if (muted || requestedBgm === id) return;
     this.stopBgm();
+    const generation = bgmGeneration;
+    requestedBgm = id;
     const source = soundAssets.bgm?.[id];
     if (source) {
       const audio = new Audio(source);
       audio.loop = true;
       audio.volume = 0.22;
       bgmAudio = audio;
-      void audio.play().catch(() => {
-        if (bgmAudio === audio) {
+      void audio.play().then(() => {
+        if (generation !== bgmGeneration || bgmAudio !== audio || muted) {
+          audio.pause();
+          audio.currentTime = 0;
+        }
+      }).catch(() => {
+        if (generation === bgmGeneration && bgmAudio === audio && !muted) {
           bgmAudio = null;
-          startSynthBgm(id);
+          void startSynthBgm(id, generation);
         }
       });
       return;
     }
-    startSynthBgm(id);
+    void startSynthBgm(id, generation);
   },
   stopBgm() {
+    bgmGeneration += 1;
+    requestedBgm = null;
     if (bgmAudio) {
       bgmAudio.pause();
-      bgmAudio.currentTime = 0;
+      try {
+        bgmAudio.currentTime = 0;
+      } catch {
+        // The media source may not have loaded enough to seek yet.
+      }
       bgmAudio = null;
     }
     stopSynthBgm();
   },
 };
 
-function startSynthBgm(id: BgmId) {
-  void resume().then((audio) => {
-    const riff = BGM_RIFFS[id];
-    let step = 0;
-    const osc = audio.createOscillator();
-    const gain = audio.createGain();
-    osc.type = "square";
-    gain.gain.value = 0.035;
-    osc.connect(gain);
-    gain.connect(audio.destination);
-    osc.start();
-    const tick = () => {
-      osc.frequency.setValueAtTime(riff[step % riff.length], audio.currentTime);
-      step += 1;
-    };
-    tick();
-    const timer = window.setInterval(tick, id === "race" ? 180 : 260);
-    bgmNodes = { osc, gain, timer };
-  });
+async function startSynthBgm(id: BgmId, generation: number) {
+  const audio = await resume();
+  if (muted || generation !== bgmGeneration || requestedBgm !== id) return;
+  const isWalk = id === "walk";
+  const riff = BGM_RIFFS[id];
+  let step = 0;
+  const melody = audio.createOscillator();
+  const bass = audio.createOscillator();
+  const gain = audio.createGain();
+  melody.type = isWalk ? "sine" : "triangle";
+  bass.type = isWalk ? "triangle" : "sine";
+  const now = audio.currentTime;
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(isWalk ? 0.045 : 0.024, now + 0.45);
+  melody.connect(gain);
+  bass.connect(gain);
+  gain.connect(audio.destination);
+  melody.start(now);
+  bass.start(now);
+  const tick = () => {
+    if (generation !== bgmGeneration || requestedBgm !== id) return;
+    const note = riff[step % riff.length];
+    const tickTime = audio.currentTime;
+    melody.frequency.setTargetAtTime(note, tickTime, 0.025);
+    bass.frequency.setTargetAtTime(note / 2, tickTime, 0.04);
+    step += 1;
+  };
+  tick();
+  const timer = window.setInterval(tick, isWalk ? 420 : 260);
+  bgmNodes = { oscillators: [melody, bass], gain, timer };
 }
 
 function stopSynthBgm() {
   if (!bgmNodes) return;
-  window.clearInterval(bgmNodes.timer);
-  try {
-    bgmNodes.osc.stop();
-  } catch {
-    /* already stopped */
-  }
-  bgmNodes.osc.disconnect();
-  bgmNodes.gain.disconnect();
+  const track = bgmNodes;
+  window.clearInterval(track.timer);
   bgmNodes = null;
+  const now = context?.currentTime ?? 0;
+  track.gain.gain.cancelScheduledValues(now);
+  track.gain.gain.setValueAtTime(track.gain.gain.value, now);
+  track.gain.gain.linearRampToValueAtTime(0.0001, now + 0.06);
+  track.oscillators.forEach((oscillator) => {
+    oscillator.onended = () => oscillator.disconnect();
+    try {
+      oscillator.stop(now + 0.07);
+    } catch {
+      oscillator.disconnect();
+    }
+  });
+  window.setTimeout(() => track.gain.disconnect(), 100);
 }
